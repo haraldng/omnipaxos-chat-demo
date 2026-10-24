@@ -39,9 +39,8 @@ impl net::Endpoint for ReplicatedLog {
 
     /// 3. A link to `peer` (re)opened. OmniPaxos `reconnected(peer)` sends a
     /// `PrepareReq`; if `peer` leads, it answers with a `Prepare` that syncs
-    /// our log. This is what catches up a node restarted with **empty**
-    /// storage: with no promise it would otherwise sit idle until the leader's
-    /// next write reached it.
+    /// any entries we missed while down (even when our on-disk store already
+    /// has an older prefix of the log).
     async fn link_up(&self, peer: NodeId) {
         self.handle.reconnected(peer).await;
     }

@@ -20,6 +20,9 @@ pub struct LocalCluster {
     pub net: Arc<LocalNet<ReplicatedLog>>,
     /// Behind a lock so a crashed node can be replaced by a restarted one.
     nodes: RwLock<BTreeMap<NodeId, Arc<Node>>>,
+    /// Default store root, deleted with the cluster (`configure` may point
+    /// `data_dir` elsewhere, as `omni_chat cluster` does).
+    _data_root: tempfile::TempDir,
 }
 
 impl LocalCluster {
@@ -29,20 +32,27 @@ impl LocalCluster {
         engine: impl Fn(NodeId) -> Arc<dyn LlmEngine>,
     ) -> anyhow::Result<Self> {
         let pids: Vec<NodeId> = (1..=n).collect();
+        let data_root = tempfile::TempDir::new()?;
         let net = LocalNet::new();
         let mut nodes = BTreeMap::new();
         for &pid in &pids {
             let mut opts = NodeOptions::new(pid, pids.clone());
+            opts.log.data_dir = data_root.path().to_path_buf();
             configure(&mut opts);
-            let node = Node::start(opts, engine(pid)).await?;
+            nodes.insert(pid, Node::start(opts, engine(pid)).await?);
+        }
+        // Opening each store takes milliseconds. Connecting nodes as they start
+        // would elect each newcomer in turn (higher pid wins), so connect them
+        // all at once, after every store is open.
+        for node in nodes.values() {
             if let Some(log) = node.shared.log.replicated() {
                 node.add_task(net.register(log.clone()));
             }
-            nodes.insert(pid, node);
         }
         Ok(Self {
             net,
             nodes: RwLock::new(nodes),
+            _data_root: data_root,
         })
     }
 
@@ -93,22 +103,35 @@ impl LocalCluster {
         self.node(pid).crash();
     }
 
-    /// Restart a crashed node with **empty** in-memory storage and the same
-    /// options. OmniPaxos syncs it from the current leader once it rejoins.
-    ///
-    /// Safe for the demo as long as at most one node is down or catching up at
-    /// a time: a node that forgot its log must not be needed for a quorum
-    /// before it has caught up.
+    /// Restart a crashed node with the same options. It reopens its on-disk
+    /// store, so it keeps its log and promises; OmniPaxos syncs whatever was
+    /// decided while it was down once it rejoins.
     pub async fn restart(&self, pid: NodeId) -> anyhow::Result<Arc<Node>> {
-        let old = self.node(pid);
-        anyhow::ensure!(old.is_crashed(), "node {pid} is still running");
-        let node = Node::start(old.shared.opts.clone(), old.shared.engine.clone()).await?;
+        let old = self.nodes.write().unwrap().remove(&pid);
+        let old = old.ok_or_else(|| anyhow::anyhow!("unknown node {pid}"))?;
+        if !old.is_crashed() {
+            self.nodes.write().unwrap().insert(pid, old);
+            anyhow::bail!("node {pid} is still running");
+        }
+        let (opts, engine) = (old.shared.opts.clone(), old.shared.engine.clone());
+        // The store can only be reopened once the old actor has dropped it,
+        // which needs every handle gone: the aborted tasks' and `old`'s own.
+        let stopped = old.shared.log.replicated().map(|l| l.stopped());
+        old.wait_stopped().await;
+        drop(old);
+        if let Some(stopped) = stopped {
+            tokio::time::timeout(Duration::from_secs(5), stopped)
+                .await
+                .map_err(|_| anyhow::anyhow!("node {pid}'s old actor did not stop"))?;
+        }
+
+        let node = Node::start(opts, engine).await?;
         if let Some(log) = node.shared.log.replicated() {
             node.add_task(self.net.register(log.clone()));
         }
         self.nodes.write().unwrap().insert(pid, node.clone());
         self.net.rejoin(pid).await;
-        info!(node = pid, "restarted with empty state");
+        info!(node = pid, "restarted from its on-disk store");
         Ok(node)
     }
 }

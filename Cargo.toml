@@ -14,7 +14,8 @@ path = "src/main.rs"
 [dependencies]
 omnipaxos = { version = "0.2.4", features = ["macros", "serde"] }
 omnipaxos_runtime = { version = "0.1.2", features = ["tokio_runtime", "serde"] }
-omnipaxos_storage = "0.2.4"
+omnipaxos_storage = { version = "0.2.4", features = ["persistent_storage"] }
+tempfile = "3"
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "signal", "process"] }
 axum = "0.7"

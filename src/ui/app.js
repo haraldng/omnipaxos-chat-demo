@@ -16,7 +16,7 @@ const state = {
   failover: null,     // {killed, at, precise, expectResume, electMs, newLeader, resumeMs}
   supervisor: false,  // the UI server can kill/restart nodes
   outage: null,       // single server only: {at, precise, lost, backAt}
-  restarting: {},     // id -> {at}: restarted with empty state, not yet caught up
+  restarting: {},     // id -> {at}: restarted, waiting to match leader log length
 };
 
 const $ = (id) => document.getElementById(id);
@@ -84,7 +84,7 @@ async function poll() {
   for (const [id, r] of Object.entries(state.restarting)) {
     const n = byId(Number(id));
     if (n.alive && n.status.decided_len >= target && target >= 0) {
-      logEvent(`node ${id} caught up: ${n.status.decided_len} entries synced in ${ms(Date.now() - r.at)}`, "ok");
+      logEvent(`node ${id} rejoined: log ${n.status.decided_len} in ${ms(Date.now() - r.at)}`, "ok");
       delete state.restarting[id];
     }
   }
@@ -312,11 +312,11 @@ async function kill(id) {
 async function restart(id) {
   const down = state.nodes.filter((n) => n.alive === false && n.id !== id).length;
   if (down) logEvent(`note: ${down} other node(s) still down — restart one at a time`, "warn");
-  logEvent(`restarting node ${id} with empty state`, "warn");
+  logEvent(`restarting node ${id} from disk`, "warn");
   try {
     const r = await fetchJSON(`/api/nodes/${id}/restart`, { method: "POST" }, 3000);
     if (r.status !== 200) { logEvent(`restart failed: ${r.body.error ?? r.status}`, "bad"); return; }
-    // A single server has nobody to catch up from: it just starts empty.
+    // A single server has no on-disk OmniPaxos store: it just starts empty.
     if (!single()) state.restarting[id] = { at: Date.now() };
   } catch { logEvent(`restart of node ${id} failed`, "bad"); }
 }
@@ -549,7 +549,7 @@ setInterval(() => {
       "<b>restart</b> brings it back with empty memory.";
   } else if (state.supervisor) {
     $("cluster-hint").innerHTML = "Click a node to send through it. <b>Kill</b> sends it SIGKILL; " +
-      "<b>restart</b> brings it back with empty state, and OmniPaxos catches it up. One node down at a time.";
+      "<b>restart</b> reopens its on-disk store (log + promises survive). Missed entries sync from the leader.";
   }
   state.connected = state.nodes[0].id;
   render();

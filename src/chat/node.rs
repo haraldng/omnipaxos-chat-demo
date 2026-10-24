@@ -190,6 +190,8 @@ impl Shared {
 pub struct Node {
     pub shared: Arc<Shared>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// Tasks aborted by [`Node::crash`] that may not have finished unwinding.
+    stopping: Mutex<Vec<JoinHandle<()>>>,
     crashed: watch::Sender<bool>,
 }
 
@@ -218,6 +220,7 @@ impl Node {
         Ok(Arc::new(Self {
             shared,
             tasks: Mutex::new(tasks),
+            stopping: Mutex::new(Vec::new()),
             crashed: watch::channel(false).0,
         }))
     }
@@ -233,11 +236,22 @@ impl Node {
     /// Stop everything this node does (fail-stop). Its HTTP server shuts down
     /// via [`Node::crashed`].
     pub fn crash(&self) {
-        for t in self.tasks.lock().unwrap().drain(..) {
+        let aborted: Vec<_> = self.tasks.lock().unwrap().drain(..).collect();
+        for t in &aborted {
             t.abort();
         }
+        *self.stopping.lock().unwrap() = aborted;
         self.crashed.send_replace(true);
         warn!(node = self.pid(), "node crashed");
+    }
+
+    /// Wait until the tasks stopped by [`Node::crash`] have dropped everything
+    /// they held, including their handles to the log.
+    pub async fn wait_stopped(&self) {
+        let tasks = std::mem::take(&mut *self.stopping.lock().unwrap());
+        for t in tasks {
+            let _ = t.await;
+        }
     }
 
     pub fn is_crashed(&self) -> bool {

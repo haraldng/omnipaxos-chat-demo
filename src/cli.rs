@@ -40,7 +40,7 @@ pub enum Command {
         common: Common,
     },
     /// Launch N replica processes and the browser UI, which can kill and
-    /// restart them (restarted nodes come back empty and catch up).
+    /// restart them (restarted nodes reopen their on-disk store).
     Demo {
         #[arg(long, default_value_t = 3)]
         nodes: u64,
@@ -91,6 +91,9 @@ pub struct Common {
     /// Election timeout in ticks.
     #[arg(long, default_value_t = 10)]
     pub election_ticks: u64,
+    /// Per-node OmniPaxos store root (`<data-dir>/node<id>/`). Survives kill/restart.
+    #[arg(long, default_value = "target/omni-chat-data")]
+    pub data_dir: std::path::PathBuf,
 }
 
 impl Common {
@@ -124,6 +127,10 @@ impl Common {
             ),
             ("--tick-ms", self.tick_ms.to_string()),
             ("--election-ticks", self.election_ticks.to_string()),
+            (
+                "--data-dir",
+                self.data_dir.to_string_lossy().into_owned(),
+            ),
         ]
         .into_iter()
         .flat_map(|(k, v)| [k.to_string(), v])
@@ -135,5 +142,6 @@ impl Common {
         o.max_context_messages = self.max_context_messages;
         o.log.tick_period = Duration::from_millis(self.tick_ms);
         o.log.election_tick_timeout = self.election_ticks;
+        o.log.data_dir = self.data_dir.clone();
     }
 }

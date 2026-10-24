@@ -1,6 +1,6 @@
 //! One node's replica of the log: the whole OmniPaxos surface the chat app uses.
 
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use omnipaxos::{
     messages::Message,
@@ -10,7 +10,7 @@ use omnipaxos::{
 use omnipaxos_runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
 };
-use omnipaxos_storage::memory_storage::MemoryStorage;
+use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
 use serde::Serialize;
 use tokio::{sync::watch, task::JoinHandle};
 use tracing::info;
@@ -26,6 +26,9 @@ pub struct LogConfig {
     pub tick_period: Duration,
     /// Election timeout = `election_tick_timeout * tick_period`.
     pub election_tick_timeout: u64,
+    /// Each node's RocksDB store lives in `<data_dir>/node<pid>/`; a restarted
+    /// node reopens it and recovers its log and promises.
+    pub data_dir: PathBuf,
 }
 
 impl LogConfig {
@@ -35,7 +38,12 @@ impl LogConfig {
             nodes,
             tick_period: Duration::from_millis(10),
             election_tick_timeout: 10,
+            data_dir: PathBuf::from("target/omni-chat-data"),
         }
+    }
+
+    pub fn storage_path(&self) -> PathBuf {
+        self.data_dir.join(format!("node{}", self.pid))
     }
 }
 
@@ -56,8 +64,8 @@ impl LeaderState {
 }
 
 /// A replica of the replicated log, backed by an OmniPaxos actor with
-/// **in-memory** storage (a restarted node starts empty and is synced by the
-/// leader). Cheap to clone; all clones share the actor.
+/// **persistent** RocksDB storage (a restarted node reopens the same path and
+/// keeps its log and promises). Cheap to clone; all clones share the actor.
 #[derive(Clone)]
 pub struct ReplicatedLog {
     pid: NodeId,
@@ -73,6 +81,10 @@ impl ReplicatedLog {
     /// Build and spawn the OmniPaxos actor. The returned task keeps
     /// [`ReplicatedLog::leader`] up to date; abort it to fail-stop the node.
     pub fn start(cfg: LogConfig) -> anyhow::Result<(Self, JoinHandle<()>)> {
+        let path = cfg.storage_path();
+        std::fs::create_dir_all(&path)?;
+        let storage_cfg = PersistentStorageConfig::with_path(path.to_string_lossy().into_owned());
+        let storage = PersistentStorage::<ChatEntry>::open(storage_cfg);
         let op = OmniPaxosConfig {
             cluster_config: ClusterConfig {
                 configuration_id: 1,
@@ -85,7 +97,7 @@ impl ReplicatedLog {
                 ..Default::default()
             },
         }
-        .build::<ChatEntry, MemoryStorage<ChatEntry>>(MemoryStorage::default())?;
+        .build::<ChatEntry, PersistentStorage<ChatEntry>>(storage)?;
         let handle = spawn_actor::<_, _, TokioRuntime>(
             op,
             RuntimeConfig {
@@ -105,6 +117,14 @@ impl ReplicatedLog {
 
     pub fn pid(&self) -> NodeId {
         self.pid
+    }
+
+    /// Resolves once the actor has exited, i.e. every handle is dropped and its
+    /// storage is closed (so the store can be reopened). Drains outgoing
+    /// messages, so only use it on a crashed node.
+    pub fn stopped(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let outgoing = self.outgoing.clone();
+        async move { while outgoing.recv().await.is_ok() {} }
     }
 
     pub fn leader_state(&self) -> LeaderState {

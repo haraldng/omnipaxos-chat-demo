@@ -6,7 +6,7 @@
 //!
 //! * [`entry`] — [`ChatEntry`], exactly what is replicated.
 //! * [`log`] — [`ReplicatedLog`]: builds the OmniPaxos config, spawns the async
-//!   actor (in-memory storage), turns leader events into a watchable
+//!   actor (persistent RocksDB storage), turns leader events into a watchable
 //!   [`LeaderState`], exposes the decided log as a stream, and appends entries.
 //! * [`endpoint`] — the four touchpoints between OmniPaxos and the network
 //!   (outgoing, deliver, link up, wire codec). The network itself (`crate::net`)

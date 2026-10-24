@@ -1,9 +1,9 @@
 //! Kill and restart replicas from the UI. A dead node can't restart itself,
 //! so this runs in the (non-replica) UI process.
 //!
-//! Restarted nodes come back with **empty** in-memory storage and are synced
-//! by OmniPaxos from the current leader. That is only safe while at most one
-//! node is down or catching up at a time, which is how the demo is driven.
+//! Restarted nodes reopen the same on-disk OmniPaxos store, so they keep their
+//! log and promises. Any entries decided while they were down are synced from
+//! the leader on rejoin.
 
 use std::{
     collections::HashMap,
@@ -30,7 +30,7 @@ use crate::{
 pub trait Supervisor: Send + Sync {
     /// Fail-stop the node. Returns the wall-clock millis it was killed at.
     async fn kill(&self, id: NodeId) -> anyhow::Result<u64>;
-    /// Start a killed node again, with empty state.
+    /// Start a killed node again (reopens its persistent store).
     async fn restart(&self, id: NodeId) -> anyhow::Result<()>;
 }
 
@@ -64,7 +64,7 @@ impl ProcessSupervisor {
             .create(true)
             .append(true)
             .open(self.log_path(id))?;
-        writeln!(log, "===== starting node {id} (empty state) =====")?;
+        writeln!(log, "===== starting node {id} =====")?;
         let child = Command::new(&self.exe)
             .args([
                 "node",
@@ -108,7 +108,7 @@ impl Supervisor for ProcessSupervisor {
     async fn restart(&self, id: NodeId) -> anyhow::Result<()> {
         anyhow::ensure!(!self.is_running(id), "node {id} is still running");
         let pid = self.spawn(id)?;
-        info!(node = id, "restarted as pid {pid} with empty state");
+        info!(node = id, "restarted as pid {pid} (persistent storage)");
         Ok(())
     }
 }

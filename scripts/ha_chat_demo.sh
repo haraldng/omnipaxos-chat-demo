@@ -55,6 +55,8 @@ for m in d["messages"]:
 
 cargo build -q
 mkdir -p "$LOG_DIR"
+DATA_DIR=${DATA_DIR:-target/omni-chat-data}
+rm -rf "$DATA_DIR"
 declare -a PIDS
 cleanup() { kill "${PIDS[@]}" 2>/dev/null || true; }
 trap cleanup EXIT
@@ -62,7 +64,7 @@ trap cleanup EXIT
 bold "Starting $NODES replicas (model=$MODEL); logs in $LOG_DIR/"
 for id in $(seq 1 $NODES); do
   RUST_LOG=${RUST_LOG:-info} "$BIN" node --id "$id" --nodes $NODES --base-port "$BASE_PORT" \
-    --model "$MODEL" --model-name "$MODEL_NAME" \
+    --model "$MODEL" --model-name "$MODEL_NAME" --data-dir "$DATA_DIR" \
     >"$LOG_DIR/node$id.log" 2>&1 &
   PIDS[$id]=$!
   echo "node $id: pid ${PIDS[$id]}, $(url "$id")"
@@ -82,6 +84,8 @@ transcript 1
 bold "Status"
 for id in 1 2 3; do curl -sf "$(url "$id")/admin/status" | json -c . 2>/dev/null || curl -sf "$(url "$id")/admin/status"; echo; done
 
+# Leadership can move while the nodes start up; kill whoever leads now.
+LEADER=$(wait_leader 1 2 3)
 bold "kill -9 leader (node $LEADER, pid ${PIDS[$LEADER]})"
 { kill -9 "${PIDS[$LEADER]}"; wait "${PIDS[$LEADER]}"; } 2>/dev/null || true
 SURVIVORS=()
