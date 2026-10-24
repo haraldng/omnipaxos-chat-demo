@@ -1,0 +1,35 @@
+services:
+  omni-chat:
+    build: .
+    ports:
+      # UI on 8080, node APIs on 8081-8083 (3 replicas). Browser fetches the
+      # node ports directly, so they must be published too, not just proxied.
+      - "8080-8083:8080-8083"
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    command:
+      - demo
+      - --nodes
+      - "${NODES:-3}"
+      - --base-port
+      - "8080"
+      - --model
+      - "${MODEL:-mock}"
+      - --model-name
+      - "${MODEL_NAME:-llama3.1:8b}"
+      - --mock-delay-ms
+      - "${MOCK_DELAY_MS:-0}"
+      - --ollama-url
+      - "http://ollama:11434"
+
+  # Only started with `docker compose --profile ollama up`.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

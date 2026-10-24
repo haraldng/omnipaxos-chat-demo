@@ -1,0 +1,7 @@
+target
+.git
+.claude
+.vscode
+*.log
+PLAN.md
+blog.md

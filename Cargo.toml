@@ -1,0 +1,37 @@
+[package]
+name = "omni_chat"
+version = "0.1.0"
+edition = "2021"
+description = "Toy HA single-chat LLM: the conversation is an OmniPaxos replicated log."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "omni_chat"
+path = "src/main.rs"
+
+[dependencies]
+omnipaxos = { version = "0.2.4", features = ["macros", "serde"] }
+omnipaxos_runtime = { version = "0.1.2", features = ["tokio_runtime", "serde"] }
+omnipaxos_storage = "0.2.4"
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "signal", "process"] }
+axum = "0.7"
+tower-http = { version = "0.6", features = ["cors"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1.3"
+async-channel = "2"
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
