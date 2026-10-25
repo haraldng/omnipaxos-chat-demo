@@ -1,16 +1,20 @@
 # OmniPaxos Chat Demo
 
-This is a small demo of how to build a highly available chatbot on top of OmniPaxos: the conversation is a replicated log, the leader runs an open-weight model, and if that node dies another continues the same chat.
+This is a small demo of how to build a highly available chatbot on top of [OmniPaxos](https://github.com/haraldng/omnipaxos): the conversation is a replicated log, the leader runs an open-weight model, and if that node dies another continues the same chat.
 
 Related resources:
 - [Blog post](https://omnipaxos.com/blog/building-a-highly-available-chatbot-with-omnipaxos/)
-- [Video](https://youtu.be/RWANL2Ishe0)
+- [Video on Youtube](https://youtu.be/RWANL2Ishe0)
+
+<p align="center">
+  <img src="images/streaming.png" alt="OmniChat UI: conversation on the left, cluster status and replicated log on the right" width="900"/>
+</p>
 
 ## Requirements
 
 We used the following:
-- Docker (for demo)
 - Rust (for development)
+- Optional: Docker (for demo)
 - Optional: [Ollama](https://ollama.com) with an open-weight model (e.g. `llama3.1:8b`)
 
 ## Demos
